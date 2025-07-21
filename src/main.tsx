@@ -10,6 +10,7 @@ import { config } from "./rainbow.ts";
 import "./index.css";
 import "@rainbow-me/rainbowkit/styles.css";
 import { RainbowKitProvider } from "@rainbow-me/rainbowkit";
+import { Toaster } from "@/components/ui";
 
 globalThis.Buffer = Buffer;
 
@@ -26,6 +27,7 @@ ReactDOM.createRoot(root).render(
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider>
           <App />
+          <Toaster />
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>
