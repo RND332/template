@@ -8,6 +8,7 @@ import App from "./App.tsx";
 import { config } from "./rainbow.ts";
 
 import "./index.css";
+import "@rainbow-me/rainbowkit/styles.css";
 import { RainbowKitProvider } from "@rainbow-me/rainbowkit";
 
 globalThis.Buffer = Buffer;
