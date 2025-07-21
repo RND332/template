@@ -5,9 +5,10 @@ import ReactDOM from "react-dom/client";
 import { WagmiProvider } from "wagmi";
 
 import App from "./App.tsx";
-import { config } from "./wagmi.ts";
+import { config } from "./rainbow.ts";
 
 import "./index.css";
+import { RainbowKitProvider } from "@rainbow-me/rainbowkit";
 
 globalThis.Buffer = Buffer;
 
@@ -22,7 +23,9 @@ ReactDOM.createRoot(root).render(
   <React.StrictMode>
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
-        <App />
+        <RainbowKitProvider>
+          <App />
+        </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>
   </React.StrictMode>,
