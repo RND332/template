@@ -25,7 +25,6 @@ ReactDOM.createRoot(root).render(
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider>
-          <App />
           <Toaster />
         </RainbowKitProvider>
       </QueryClientProvider>
