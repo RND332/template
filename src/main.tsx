@@ -18,6 +18,7 @@ import { RainbowKitProvider, ConnectButton } from "@rainbow-me/rainbowkit";
 import { Toaster } from "@/components/ui";
 import Launchpad from "./lib/ABI/Launchpad.ts";
 import { zeroAddress } from "viem";
+import ERC20 from "./lib/ABI/ERC20.ts";
 
 globalThis.Buffer = Buffer;
 
@@ -52,12 +53,11 @@ const App = () => {
 	const [sellTokenAmount, setSellTokenAmount] = useState("");
 	const [activeTab, setActiveTab] = useState<"buy" | "sell">("buy");
 
-	const { data: nativeBalance } = useBalance({
-		address: "0x30fDf316f8DFA2F0d10c7e2F900F43979ca4C60a",
-	});
-
-	const { data: tokenBalance } = useBalance({
+	const { data: tokenBalance } = useReadContract({
 		address: TOKEN_ADDRESS,
+		abi: ERC20,
+		functionName: "balanceOf",
+		args: TOKEN_ADDRESS ? [TOKEN_ADDRESS] : undefined,
 		chainId: 52226,
 	});
 
@@ -137,7 +137,7 @@ const App = () => {
 								<div>
 									<div className="text-gray-500">{TOKEN_NAME} Balance</div>
 									<div className="font-medium">
-										{tokenBalance ? formatEther(tokenBalance?.value) : "0"}
+										{tokenBalance ? formatEther(tokenBalance) : "0"}
 									</div>
 								</div>
 							</div>
