@@ -21,6 +21,10 @@ import { zeroAddress } from "viem";
 
 globalThis.Buffer = Buffer;
 
+/// убрать чейн свитчер
+/// убрать блок интерфеса если без кошелька
+/// NATIVE CURENCY SYMBOL вместо ETH
+
 const LAUNCHPAD_ADDRESS = "0x59a46012555054a143273A78590cff91327B3C7A";
 const TOKEN_ADDRESS = zeroAddress;
 const TOKEN_NAME = "TEST_NAME";
@@ -39,14 +43,18 @@ const formatEther = (wei: bigint | undefined) => {
 };
 
 const App = () => {
-	const { address, isConnected } = useAccount();
+	const { isConnected, chain } = useAccount();
+	const nativeSymbol = chain?.nativeCurrency.symbol;
+
 	const { writeContract, isPending: isWritePending } = useWriteContract();
 
 	const [buyEthAmount, setBuyEthAmount] = useState("");
 	const [sellTokenAmount, setSellTokenAmount] = useState("");
 	const [activeTab, setActiveTab] = useState<"buy" | "sell">("buy");
 
-	const { data: nativeBalance } = useBalance();
+	const { data: nativeBalance } = useBalance({
+		address: "0x30fDf316f8DFA2F0d10c7e2F900F43979ca4C60a",
+	});
 
 	const { data: tokenBalance } = useBalance({
 		address: TOKEN_ADDRESS,
@@ -116,9 +124,8 @@ const App = () => {
 			<div className="w-[400px]">
 				{isConnected && (
 					<div className="text-center mb-0 flex items-center w-full justify-end ">
-						<h1 className="text-2xl font-semibold text-gray-800"></h1>
 						<div className="mb-4">
-							<ConnectButton showBalance={false} />
+							<ConnectButton showBalance={true} />
 						</div>
 					</div>
 				)}
@@ -128,17 +135,9 @@ const App = () => {
 						<div className="bg-white rounded-lg p-4 shadow-sm">
 							<div className="flex justify-between text-sm">
 								<div>
-									<div className="text-gray-500">ETH Balance</div>
-									<div className="font-medium">
-										{nativeBalance?.value
-											? parseFloat(formatEther(nativeBalance.value)).toFixed(4)
-											: "0.0000"}
-									</div>
-								</div>
-								<div className="text-right">
 									<div className="text-gray-500">{TOKEN_NAME} Balance</div>
 									<div className="font-medium">
-										{tokenBalance ? formatEther(nativeBalance?.value) : "0"}
+										{tokenBalance ? formatEther(tokenBalance?.value) : "0"}
 									</div>
 								</div>
 							</div>
@@ -149,7 +148,7 @@ const App = () => {
 								<div className="flex justify-between items-center">
 									<span className="text-gray-600">Liquidity:</span>
 									<span className="font-medium">
-										{formatEther(ethSupply)} ETH
+										{formatEther(ethSupply)} {nativeSymbol}
 									</span>
 								</div>
 							</div>
@@ -184,7 +183,7 @@ const App = () => {
 									<div className="space-y-4">
 										<div>
 											<label className="block text-xs text-gray-500 mb-1">
-												ETH to spend
+												{nativeSymbol} to spend
 											</label>
 											<div className="relative">
 												<input
@@ -196,7 +195,9 @@ const App = () => {
 													min="0"
 												/>
 												<div className="absolute inset-y-0 right-0 flex items-center pr-3">
-													<span className="text-gray-500 text-sm">ETH</span>
+													<span className="text-gray-500 text-sm">
+														{nativeSymbol}
+													</span>
 												</div>
 											</div>
 										</div>
@@ -208,7 +209,7 @@ const App = () => {
 													onClick={() => setBuyTemplate(amount.toString())}
 													className="flex-1 py-2 px-3 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded-lg transition-colors"
 												>
-													{amount} ETH
+													{amount} {nativeSymbol}
 												</button>
 											))}
 										</div>
@@ -235,7 +236,7 @@ const App = () => {
 										>
 											{isWritePending
 												? "Processing..."
-												: `Buy with ${buyEthAmount || 0} ETH`}
+												: `Buy with ${buyEthAmount || 0} ${nativeSymbol}`}
 										</button>
 									</div>
 								) : (
@@ -282,7 +283,7 @@ const App = () => {
 												<div className="flex justify-between text-sm">
 													<span className="text-red-700">You receive:</span>
 													<span className="font-medium text-red-700">
-														{formatEther(ethOut)} ETH
+														{formatEther(ethOut)} {nativeSymbol}
 													</span>
 												</div>
 											</div>

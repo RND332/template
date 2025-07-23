@@ -8,7 +8,7 @@ export const cytonic = defineChain({
 	},
 	nativeCurrency: {
 		name: "Cytonic",
-		symbol: "CYT",
+		symbol: "CCC",
 		decimals: 18,
 	},
 	blockExplorers: {
