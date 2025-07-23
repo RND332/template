@@ -46,9 +46,7 @@ const App = () => {
 	const [sellTokenAmount, setSellTokenAmount] = useState("");
 	const [activeTab, setActiveTab] = useState<"buy" | "sell">("buy");
 
-	const { data: nativeBalance } = useBalance({
-		chainId: 52226,
-	});
+	const { data: nativeBalance } = useBalance();
 
 	const { data: tokenBalance } = useBalance({
 		address: TOKEN_ADDRESS,
