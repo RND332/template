@@ -1,13 +1,10 @@
 import { Buffer } from "buffer";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import React, { useState } from "react";
+import React from "react";
 import ReactDOM from "react-dom/client";
 import {
 	useAccount,
-	useWriteContract,
-	useReadContract,
 	WagmiProvider,
-	useBalance,
 } from "wagmi";
 
 import { config } from "./rainbow.ts";
@@ -15,21 +12,10 @@ import { config } from "./rainbow.ts";
 import "./index.css";
 import "@rainbow-me/rainbowkit/styles.css";
 import { RainbowKitProvider, ConnectButton } from "@rainbow-me/rainbowkit";
-import { Toaster } from "@/components/ui";
-import Launchpad from "./lib/ABI/Launchpad.ts";
-import { zeroAddress } from "viem";
-import ERC20 from "./lib/ABI/ERC20.ts";
+import { Button, Toaster } from "@/components/ui";
+import { createRootRoute, createRoute, createRouter, Link, Outlet, redirect, RouterProvider } from '@tanstack/react-router'
 
 globalThis.Buffer = Buffer;
-
-/// убрать чейн свитчер
-/// убрать блок интерфеса если без кошелька
-/// NATIVE CURENCY SYMBOL вместо ETH
-
-const LAUNCHPAD_ADDRESS = "0x59a46012555054a143273A78590cff91327B3C7A";
-const TOKEN_ADDRESS = zeroAddress;
-const TOKEN_NAME = "TEST_NAME";
-const TOKEN_SYMBOL = "TEST_SYM";
 
 const queryClient = new QueryClient();
 
@@ -38,294 +24,189 @@ if (!root) {
 	throw new Error("Root element not found");
 }
 
-const formatEther = (wei: bigint | undefined) => {
-	if (!wei) return "0";
-	return (Number(wei.toString()) / 10 ** 18).toFixed(4);
-};
-
-const App = () => {
-	const { isConnected, chain } = useAccount();
-	const nativeSymbol = chain?.nativeCurrency.symbol;
-
-	const { writeContract, isPending: isWritePending } = useWriteContract();
-
-	const [buyEthAmount, setBuyEthAmount] = useState("");
-	const [sellTokenAmount, setSellTokenAmount] = useState("");
-	const [activeTab, setActiveTab] = useState<"buy" | "sell">("buy");
-
-	const { data: tokenBalance } = useReadContract({
-		address: TOKEN_ADDRESS,
-		abi: ERC20,
-		functionName: "balanceOf",
-		args: TOKEN_ADDRESS ? [TOKEN_ADDRESS] : undefined,
-		chainId: 52226,
-	});
-
-	const { data: ethSupply } = useReadContract({
-		address: LAUNCHPAD_ADDRESS,
-		abi: Launchpad,
-		functionName: "ethSupply",
-	});
-
-	const { data: tokensOut } = useReadContract({
-		address: LAUNCHPAD_ADDRESS,
-		abi: Launchpad,
-		functionName: "getTokensOutAtCurrentSupply",
-		args:
-			buyEthAmount && parseFloat(buyEthAmount) > 0
-				? [BigInt(Math.floor(parseFloat(buyEthAmount) * 10 ** 18))]
-				: undefined,
-	});
-
-	const { data: ethOut } = useReadContract({
-		address: LAUNCHPAD_ADDRESS,
-		abi: Launchpad,
-		functionName: "getEthersOutAtCurrentSupply",
-		args:
-			sellTokenAmount && parseFloat(sellTokenAmount) > 0
-				? [BigInt(Math.floor(parseFloat(sellTokenAmount) * 10 ** 18))]
-				: undefined,
-	});
-
-	const handleBuy = () => {
-		if (!buyEthAmount || parseFloat(buyEthAmount) <= 0) return;
-		const ethAmountInWei = BigInt(
-			Math.floor(parseFloat(buyEthAmount) * 10 ** 18),
-		);
-		writeContract({
-			address: LAUNCHPAD_ADDRESS,
-			abi: Launchpad,
-			functionName: "buyTokens",
-			args: [ethAmountInWei],
-			value: ethAmountInWei,
-		});
-	};
-
-	const handleSell = () => {
-		if (!sellTokenAmount || parseFloat(sellTokenAmount) <= 0) return;
-		const tokenAmountInWei = BigInt(
-			Math.floor(parseFloat(sellTokenAmount) * 10 ** 18),
-		);
-		const minEthOut = ethOut ? (ethOut * BigInt(95)) / BigInt(100) : BigInt(0);
-		writeContract({
-			address: LAUNCHPAD_ADDRESS,
-			abi: Launchpad,
-			functionName: "sellTokens",
-			args: [tokenAmountInWei, minEthOut],
-		});
-	};
-
-	const setBuyTemplate = (amount: string) => {
-		setBuyEthAmount(amount);
-	};
-
-	return (
-		<div className="min-h-screen bg-gray-50 py-6 px-4  flex items-center justify-center">
-			<div className="w-[400px]">
-				{isConnected && (
-					<div className="text-center mb-0 flex items-center w-full justify-end ">
-						<div className="mb-4">
-							<ConnectButton showBalance={true} />
-						</div>
-					</div>
-				)}
-
-				{isConnected && (
-					<div className="space-y-4">
-						<div className="bg-white rounded-lg p-4 shadow-sm">
-							<div className="flex justify-between text-sm">
-								<div>
-									<div className="text-gray-500">{TOKEN_NAME} Balance</div>
-									<div className="font-medium">
-										{tokenBalance ? formatEther(tokenBalance) : "0"}
-									</div>
-								</div>
-							</div>
-						</div>
-
-						{ethSupply?.toString() && (
-							<div className="bg-white rounded-lg p-4 shadow-sm">
-								<div className="flex justify-between items-center">
-									<span className="text-gray-600">Liquidity:</span>
-									<span className="font-medium">
-										{formatEther(ethSupply)} {nativeSymbol}
-									</span>
-								</div>
-							</div>
-						)}
-
-						<div className="bg-white rounded-lg shadow-sm overflow-hidden">
-							<div className="flex border-b">
-								<button
-									onClick={() => setActiveTab("buy")}
-									className={`flex-1 py-3 text-center text-sm font-medium cursor-pointer ${
-										activeTab === "buy"
-											? "text-green-600 border-b-2 border-green-600"
-											: "text-gray-500"
-									}`}
-								>
-									Buy
-								</button>
-								<button
-									onClick={() => setActiveTab("sell")}
-									className={`flex-1 py-3 text-center text-sm font-medium cursor-pointer ${
-										activeTab === "sell"
-											? "text-red-600 border-b-2 border-red-600"
-											: "text-gray-500"
-									}`}
-								>
-									Sell
-								</button>
-							</div>
-
-							<div className="p-4">
-								{activeTab === "buy" ? (
-									<div className="space-y-4">
-										<div>
-											<label className="block text-xs text-gray-500 mb-1">
-												{nativeSymbol} to spend
-											</label>
-											<div className="relative">
-												<input
-													type="number"
-													value={buyEthAmount}
-													onChange={(e) => setBuyEthAmount(e.target.value)}
-													placeholder="0.0"
-													className="w-full p-3 border border-gray-300 rounded-lg text-sm"
-													min="0"
-												/>
-												<div className="absolute inset-y-0 right-0 flex items-center pr-3">
-													<span className="text-gray-500 text-sm">
-														{nativeSymbol}
-													</span>
-												</div>
-											</div>
-										</div>
-
-										<div className="flex space-x-2">
-											{[1, 10, 100].map((amount) => (
-												<button
-													key={amount}
-													onClick={() => setBuyTemplate(amount.toString())}
-													className="flex-1 py-2 px-3 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded-lg transition-colors"
-												>
-													{amount} {nativeSymbol}
-												</button>
-											))}
-										</div>
-
-										{tokensOut?.toString() && parseFloat(buyEthAmount) > 0 && (
-											<div className="bg-green-50 rounded-lg p-3">
-												<div className="flex justify-between text-sm">
-													<span className="text-green-700">You receive:</span>
-													<span className="font-medium text-green-700">
-														{formatEther(tokensOut)} {TOKEN_NAME}
-													</span>
-												</div>
-											</div>
-										)}
-
-										<button
-											onClick={handleBuy}
-											disabled={
-												!buyEthAmount ||
-												parseFloat(buyEthAmount) <= 0 ||
-												isWritePending
-											}
-											className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg text-sm font-medium disabled:opacity-50"
-										>
-											{isWritePending
-												? "Processing..."
-												: `Buy with ${buyEthAmount || 0} ${nativeSymbol}`}
-										</button>
-									</div>
-								) : (
-									<div className="space-y-4">
-										<div>
-											<label className="block text-xs text-gray-500 mb-1">
-												Tokens to sell
-											</label>
-											<div className="relative">
-												<input
-													type="number"
-													value={sellTokenAmount}
-													onChange={(e) => setSellTokenAmount(e.target.value)}
-													placeholder="0.0"
-													className="w-full p-3 border border-gray-300 rounded-lg text-sm"
-													min="0"
-													step="1"
-												/>
-												<div className="absolute inset-y-0 right-0 flex items-center pr-3">
-													<span className="text-gray-500 text-sm">
-														{TOKEN_SYMBOL}
-													</span>
-												</div>
-											</div>
-										</div>
-										<div className="flex space-x-2">
-											{[25, 75, 100].map((amount) => (
-												<button
-													key={amount}
-													onClick={() =>
-														setBuyTemplate(
-															((tokenBalance / 100) * amount).toString(),
-														)
-													}
-													className="flex-1 py-2 px-3 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded-lg transition-colors"
-												>
-													{amount} %
-												</button>
-											))}
-										</div>
-
-										{ethOut?.toString() && parseFloat(sellTokenAmount) > 0 && (
-											<div className="bg-red-50 rounded-lg p-3">
-												<div className="flex justify-between text-sm">
-													<span className="text-red-700">You receive:</span>
-													<span className="font-medium text-red-700">
-														{formatEther(ethOut)} {nativeSymbol}
-													</span>
-												</div>
-											</div>
-										)}
-
-										<button
-											onClick={handleSell}
-											disabled={
-												!sellTokenAmount ||
-												parseFloat(sellTokenAmount) <= 0 ||
-												isWritePending
-											}
-											className="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded-lg text-sm font-medium disabled:opacity-50"
-										>
-											{isWritePending
-												? "Processing..."
-												: `Sell ${sellTokenAmount || 0} ${TOKEN_SYMBOL}`}
-										</button>
-									</div>
-								)}
-							</div>
-						</div>
-					</div>
-				)}
-
-				{!isConnected && (
-					<div className="text-center bg-white rounded-lg p-6 flex items-center flex-col">
-						<p className="text-gray-600 mb-4">Connect wallet to trade tokens</p>
-						<ConnectButton showBalance={false} />
-					</div>
-				)}
+const rootRoute = createRootRoute({
+	component: () => {
+		return (
+			<div className="h-svh bg-gray-50">
+				<Outlet />
 			</div>
-		</div>
-	);
-};
+		);
+	},
+	notFoundComponent: () => {
+		return (
+			<div>
+				<p>This is the notFoundComponent configured on root route</p>
+				<Link to="/swap">Start Over</Link>
+			</div>
+		)
+	},
+});
+
+const appRoute = createRoute({
+	loader: ({ location }) => {
+		// if its not /swap or /add-liquidity, redirect to /swap
+		if (location.href !== "/swap" && location.href !== "/add-liquidity") {
+			throw redirect({
+				to: "/swap"
+			});
+		}
+	},
+	getParentRoute: () => rootRoute,
+	path: "/",
+	component: () => {
+		const { isConnected } = useAccount();
+
+		return (
+			<div className="min-h-screen bg-gray-50 py-6 px-4  flex items-center justify-center">
+				<div className="w-[400px]">
+					{isConnected && (
+						<div className="text-center mb-0 flex items-center w-full justify-end ">
+							<div className="mb-4">
+								<ConnectButton showBalance={true} />
+							</div>
+						</div>
+					)}
+
+					{isConnected && (
+						<div className="space-y-4">
+							<div className="flex flex-row gap-2">
+								<Link to="/swap" className="bg-white rounded-lg p-4 shadow-sm">
+									Swap
+								</Link>
+
+								<Link to="/add-liquidity" className="bg-white rounded-lg p-4 shadow-sm">
+									Add liquidity
+								</Link>
+							</div>
+
+							<Outlet />
+						</div>
+					)}
+
+					{!isConnected && (
+						<div className="text-center bg-white rounded-lg p-6 flex items-center flex-col">
+							<p className="text-gray-600 mb-4">Connect wallet to trade tokens</p>
+							<ConnectButton showBalance={false} />
+						</div>
+					)}
+				</div>
+			</div>
+		);
+	}
+});
+
+const swapRoute = createRoute({
+	getParentRoute: () => appRoute,
+	path: '/swap',
+	component: () => {
+		return (
+			<div className="bg-white rounded-lg p-6 flex items-center gap-2 text-left shadow-2xl flex-col">
+				<h1 className="w-full">Swap</h1>
+				<div className="flex flex-col items-start justify-center w-full border border-gray-300 rounded-lg p-4 gap-2">
+					<span>Sell</span>
+					<div className="flex items-center gap-2 w-full">
+						<input type="text" className=" rounded-lg p-2 w-full" placeholder="0.0" />
+						<div className="flex items-center gap-1 bg-gray-100 rounded-lg px-2 py-1">
+							<span className="text-gray-500">ETH</span>
+						</div>
+					</div>
+					<span>0 $</span>
+				</div>
+
+				<div className="size-8">
+					<svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-gray-500 bg-gray-300 rounded-lg p-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+					</svg>
+				</div>
+
+				<div className="flex flex-col items-start justify-center w-full border border-gray-300 rounded-lg p-4 gap-2">
+					<span>Buy</span>
+					<div className="flex items-center gap-2 w-full">
+						<input type="text" className=" rounded-lg p-2 w-full" placeholder="0.0" />
+						<div className="flex items-center gap-1 bg-gray-100 rounded-lg px-2 py-1">
+							<span className="text-gray-500">ETH</span>
+						</div>
+					</div>
+					<span>0 $</span>
+				</div>
+
+				<Button className="w-full mt-4 bg-gray-500 text-white hover:bg-gray-600 transition-colors">
+					Swap
+				</Button>
+			</div>
+		);
+	},
+});
+
+const addLiquidityRoute = createRoute({
+	getParentRoute: () => appRoute,
+	path: '/add-liquidity',
+	component: () => {
+		return (
+			<div className="bg-white rounded-lg p-6 flex items-center gap-2 text-left shadow-2xl flex-col">
+				<h1 className="w-full">Add Liquidity</h1>
+				<div className="flex flex-col items-start justify-center w-full border border-gray-300 rounded-lg p-4 gap-2">
+					<span>Token A</span>
+					<div className="flex items-center gap-2 w-full">
+						<input type="text" className="rounded-lg p-2 w-full" placeholder="0.0" />
+						<div className="flex items-center gap-1 bg-gray-100 rounded-lg px-2 py-1">
+							<span className="text-gray-500">ETH</span>
+						</div>
+					</div>
+					<span>0 $</span>
+				</div>
+
+				<div className="size-8">
+					<svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-gray-500 bg-gray-300 rounded-lg p-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+					</svg>
+				</div>
+
+				<div className="flex flex-col items-start justify-center w-full border border-gray-300 rounded-lg p-4 gap-2">
+					<span>Token B</span>
+					<div className="flex items-center gap-2 w-full">
+						<input type="text" className="rounded-lg p-2 w-full" placeholder="0.0" />
+						<div className="flex items-center gap-1 bg-gray-100 rounded-lg px-2 py-1">
+							<span className="text-gray-500">USDC</span>
+						</div>
+					</div>
+					<span>0 $</span>
+				</div>
+
+				<Button className="w-full mt-4 bg-blue-500 text-white hover:bg-blue-600 transition-colors">
+					Add Liquidity
+				</Button>
+			</div>
+		);
+	},
+});
+
+const routeTree = rootRoute.addChildren([
+	appRoute.addChildren([
+		swapRoute,
+		addLiquidityRoute
+	])
+]);
+
+const router = createRouter({
+	routeTree,
+	defaultPreload: 'intent',
+	defaultStaleTime: 5000,
+	scrollRestoration: true,
+})
+
+declare module '@tanstack/react-router' {
+	interface Register {
+		router: typeof router
+	}
+}
 
 ReactDOM.createRoot(root).render(
 	<React.StrictMode>
 		<WagmiProvider config={config}>
 			<QueryClientProvider client={queryClient}>
 				<RainbowKitProvider>
-					<App />
+					<RouterProvider router={router} />
 					<Toaster />
 				</RainbowKitProvider>
 			</QueryClientProvider>
