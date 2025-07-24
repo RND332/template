@@ -4,16 +4,25 @@ import {
 	QueryClientProvider,
 	useQuery,
 } from "@tanstack/react-query";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
 	useAccount,
 	useWriteContract,
 	useReadContract,
 	WagmiProvider,
-	useClient,
-	useSimulateContract,
 } from "wagmi";
+import {
+	ColorType,
+	createChart,
+	IChartApi,
+	type ISeriesApi,
+	type LineData,
+	LineSeries,
+	type Time,
+	type WhitespaceData,
+} from "lightweight-charts";
+
 import { config } from "./rainbow.ts";
 import "./index.css";
 import "@rainbow-me/rainbowkit/styles.css";
@@ -26,9 +35,18 @@ import BigNumber from "bignumber.js";
 import { shorten } from "@/lib/utils";
 
 import { request } from "graphql-request";
-import { GET_LAUNCHPAD_QUERY, GRAPHQL_ENDPOINT } from "./launchpad-gql.ts";
+import {
+	GET_LAUNCHPAD_QUERY,
+	GET_TRANSFERS,
+	LAUNCHPAD_GQL_ENDPOINT,
+	LaunchpadDataById,
+	TransfersData,
+} from "./launchpad-gql.ts";
+import { ERC20_GQL_ENDPOINT, GET_TOP_HOLDERS } from "./erc20-gql.ts";
 
 globalThis.Buffer = Buffer;
+
+const LAUNCHPAD_ID = "0x4f3a86F6cf2d26459D86A6228febB98807D10a3c";
 
 const queryClient = new QueryClient();
 const root = document.getElementById("root");
@@ -39,7 +57,7 @@ if (!root) {
 
 const Header = () => {
 	return (
-		<div className="text-center mb-0 flex items-center w-full justify-end ">
+		<div className="text-center mb-0 flex items-center w-full justify-end p-4">
 			<ConnectButton
 				chainStatus={"none"}
 				showBalance={true}
@@ -80,16 +98,16 @@ const BalanceCard = ({
 
 	return (
 		<div className="bg-white rounded-lg p-4 shadow-sm">
-			<div className="flex gap-2 items-center">
-				<span className="text-gray-500">Liquidity:</span>
+			<div className="flex gap-2 items-center text-gray-500">
+				<span className="">Liquidity:</span>
 				<span className="font-medium">
-					{shorten(BigNumber(ethSupply))} {nativeSymbol}
+					{shorten(BigNumber(formatEther(BigInt(ethSupply))))} {nativeSymbol}
 				</span>
 			</div>
 
 			<div className="flex justify-between text-sm">
-				<div className="flex items-center gap-2">
-					<div className="text-gray-500">{name} Balance: </div>
+				<div className="flex items-center gap-2 text-gray-500">
+					<div className="text-gray-500">Your balance: </div>
 					<div className="font-medium">
 						{isConnected && tokenBalance !== undefined
 							? shorten(BigNumber(formatEther(tokenBalance)))
@@ -336,6 +354,7 @@ const TradePanel = ({
 	const { isConnected } = useAccount();
 	const [activeTab, setActiveTab] = useState<"buy" | "sell">("buy");
 	const [slippage, setSlippage] = useState("0.5");
+	const { address } = useAccount();
 
 	const {
 		writeContract,
@@ -365,6 +384,14 @@ const TradePanel = ({
 		});
 	};
 
+	const { data: allowance } = useReadContract({
+		abi: ERC20,
+		address: tokenAddress as Address,
+		functionName: "allowance",
+		args: [address as Address, launchpadAddress as Address],
+		chainId: 52226,
+	});
+
 	const handleSell = async (amount: string, estimatedEthOut: bigint) => {
 		if (!amount || parseFloat(amount) <= 0) return;
 
@@ -376,13 +403,15 @@ const TradePanel = ({
 				BigInt(Math.floor((1 - slippagePercent / 100) * 1000))) /
 			1000n;
 
-		await writeContractAsync({
-			abi: ERC20,
-			address: tokenAddress as Address,
-			functionName: "approve",
-			args: [launchpadAddress as Address, maxUint256],
-			chainId: 52226,
-		});
+		if (allowance === 0n) {
+			await writeContractAsync({
+				abi: ERC20,
+				address: tokenAddress as Address,
+				functionName: "approve",
+				args: [launchpadAddress as Address, maxUint256],
+				chainId: 52226,
+			});
+		}
 
 		await writeContractAsync({
 			address: launchpadAddress as Address,
@@ -457,120 +486,277 @@ const TradePanel = ({
 	);
 };
 
-/// добавить лайтвейт чартс
-/// добавить слипадж
-/// добавить табличку с топ токен холдерами
-/// сделать адаптивно
-/// протестить транзы
+interface ChartPoint {
+	time: Time;
+	value: number;
+}
 
-const TokenInfo = ({
-	name,
-	symbol,
-	launchpadId,
-	creatorId,
-}: {
-	name: string;
-	symbol: string;
-	launchpadId: string;
-	creatorId: string;
-}) => {
-	const shortId = `${launchpadId.slice(0, 6)}...${launchpadId.slice(-4)}`;
-	const shortCreatorId = `${creatorId.slice(0, 6)}...${creatorId.slice(-4)}`;
+type TokenChartProps = {
+	backgroundColor?: string;
+	lineColor?: string;
+	gridColor?: string;
+	textColor?: string;
+	height?: number;
+	width?: number;
+};
 
-	const { chain } = useAccount();
+const TokenChart = ({
+	backgroundColor = "#ffffff",
+	lineColor = "#2563eb",
+	gridColor = "#e5e7eb",
+	textColor = "#6b7280",
+	height = 350,
+	width = 0,
+}: TokenChartProps) => {
+	const chartContainerRef = useRef<HTMLDivElement>(null);
+	const chartRef = useRef<IChartApi | null>(null);
+	const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+
+	const {
+		data: transfersData,
+		isLoading,
+		isError,
+		error,
+	} = useQuery<TransfersData>({
+		queryKey: ["chart-transfers", LAUNCHPAD_ID],
+		queryFn: async () => {
+			return await request<TransfersData>(
+				LAUNCHPAD_GQL_ENDPOINT,
+				GET_TRANSFERS,
+				{
+					id: LAUNCHPAD_ID,
+				},
+			);
+		},
+		enabled: !!LAUNCHPAD_ID,
+	});
+
+	useEffect(() => {
+		if (!chartContainerRef.current) return;
+
+		if (chartRef.current) {
+			chartRef.current.remove();
+			chartRef.current = null;
+			seriesRef.current = null;
+		}
+
+		const chart = createChart(chartContainerRef.current, {
+			layout: {
+				background: { type: ColorType.Solid, color: backgroundColor },
+				textColor,
+				fontSize: 12,
+				attributionLogo: false,
+			},
+			grid: {
+				vertLines: { color: gridColor },
+				horzLines: { color: gridColor },
+			},
+			width: width || chartContainerRef.current.clientWidth,
+			height: height,
+			rightPriceScale: {
+				scaleMargins: {
+					top: 0.1,
+					bottom: 0.1,
+				},
+			},
+		});
+
+		const lineSeries = chart.addSeries(LineSeries, {
+			color: lineColor,
+			lineWidth: 2,
+		});
+
+		chart.applyOptions({
+			localization: {
+				priceFormatter: (price: number) => {
+					if (price < 0.000001) {
+						return price.toExponential(2);
+					} else if (price < 0.001) {
+						return price.toFixed(6);
+					} else if (price < 0.01) {
+						return price.toFixed(4);
+					} else {
+						return price.toFixed(2);
+					}
+				},
+			},
+		});
+
+		chartRef.current = chart;
+		seriesRef.current = lineSeries;
+
+		const handleResize = () => {
+			if (chartContainerRef.current && chartRef.current) {
+				chartRef.current.applyOptions({
+					width: width || chartContainerRef.current.clientWidth,
+				});
+			}
+		};
+
+		window.addEventListener("resize", handleResize);
+
+		if (transfersData?.Trade && seriesRef.current) {
+			try {
+				const chartPoints: ChartPoint[] = transfersData.Trade.map((trade) => {
+					const timestampSec = parseInt(trade.timestamp, 10);
+					const tokenAmount = BigInt(trade.tokenAmount);
+					const ethAmount = BigInt(trade.ethAmount);
+					let priceEth: number;
+					if (tokenAmount === 0n) {
+						priceEth = 0;
+					} else {
+						const ethAmountFloat = Number(ethAmount) / 1e18;
+						const tokenAmountFloat = Number(tokenAmount) / 1e18;
+						priceEth =
+							tokenAmountFloat > 0 ? ethAmountFloat / tokenAmountFloat : 0;
+					}
+
+					return {
+						time: timestampSec as Time,
+						value: priceEth,
+					};
+				}).sort((a, b) => Number(a.time) - Number(b.time));
+
+				seriesRef.current.setData(chartPoints as LineData<Time>[]);
+
+				chart.timeScale().fitContent();
+			} catch (err) {
+				console.error("Error processing chart data:", err);
+			}
+		}
+
+		return () => {
+			window.removeEventListener("resize", handleResize);
+			if (chartRef.current) {
+				chartRef.current.remove();
+				chartRef.current = null;
+				seriesRef.current = null;
+			}
+		};
+	}, [
+		backgroundColor,
+		gridColor,
+		lineColor,
+		textColor,
+		height,
+		width,
+		transfersData,
+		LAUNCHPAD_ID,
+	]);
+
+	if (isLoading) {
+		return (
+			<div className="bg-white rounded-lg p-4 h-96 flex items-center justify-center shadow-sm border border-gray-200">
+				<div className="text-gray-400">Loading chart data...</div>
+			</div>
+		);
+	}
+
+	if (isError) {
+		console.error("Chart data loading error:", error);
+		return (
+			<div className="bg-white rounded-lg p-4 h-96 flex items-center justify-center shadow-sm border border-gray-200">
+				<div className="text-red-500">Error loading chart data.</div>
+			</div>
+		);
+	}
+
+	if (!transfersData?.Trade || transfersData.Trade.length === 0) {
+		return (
+			<div className="bg-white rounded-lg p-4 h-96 flex items-center justify-center shadow-sm border border-gray-200">
+				<div className="text-gray-400">No trade data available for chart.</div>
+			</div>
+		);
+	}
 
 	return (
-		<div className="bg-white rounded-xl p-4 shadow-md flex flex-col space-y-2 border border-gray-200">
-			<div className="flex items-center justify-between">
-				<div>
-					<p className="text-lg font-semibold text-gray-900">{name}</p>
-					<p className="text-sm text-gray-500">{symbol}</p>
-				</div>
-			</div>
-			<div className="flex flex-col">
-				<a
-					href={`https://explorer.evm.testnet.cytonic.com/token/${launchpadId}`}
-					target="_blank"
-					rel="noopener noreferrer"
-					className="inline-flex items-center gap-1 text-sm text-blue-600 "
-				>
-					Token on Explorer:
-					<span className="font-mono text-orange-700">{shortId}</span>
-				</a>
-
-				<a
-					href={`https://explorer.evm.testnet.cytonic.com/address/${creatorId}`}
-					target="_blank"
-					rel="noopener noreferrer"
-					className="inline-flex items-center gap-1 text-sm text-blue-600 "
-				>
-					Creator:
-					<span className="font-mono text-orange-700">{shortCreatorId}</span>
-				</a>
-			</div>
+		<div className="bg-white rounded-lg p-4 h-96 shadow-sm border border-gray-200">
+			<div ref={chartContainerRef} className="w-full h-full" />
 		</div>
 	);
 };
 
 const App = () => {
-	const { data: launchpadData } = useQuery({
-		queryKey: ["launchpad-data"],
+	const { data: LpData } = useQuery<LaunchpadDataById>({
+		queryKey: ["launchpad-data", LAUNCHPAD_ID],
 		queryFn: async () => {
-			return await request(GRAPHQL_ENDPOINT, GET_LAUNCHPAD_QUERY);
+			return await request<LaunchpadDataById>(
+				LAUNCHPAD_GQL_ENDPOINT,
+				GET_LAUNCHPAD_QUERY,
+				{
+					id: LAUNCHPAD_ID,
+				},
+			);
 		},
 	});
+	const token = LpData?.Launchpad_by_pk?.token;
+	const tokenAddress = token?.id;
 
-	const MOCK_LAUNCHPAD_DATA = {
-		data: {
-			Launchpad: [
-				{
-					id: "0x4f3a86F6cf2d26459D86A6228febB98807D10a3c",
-					totalEthRaised: "71",
-					token: {
-						id: "0x91272F5Eed03DfB2e6D90597Db90Ab20200fad56",
-						name: "labubu token",
-						symbol: "LBUBU",
-						decimals: 18,
-					},
-					migrationInfo: null,
-					creator: {
-						id: "0xdb1c3ECF1b4C9f447b5609B6034c75E0F7137608",
-					},
-				},
-			],
-		},
-	};
-
-	const token = MOCK_LAUNCHPAD_DATA.data.Launchpad[0].token;
+	const shortId = `${tokenAddress?.slice(0, 6)}...${tokenAddress?.slice(-4)}`;
+	const shortCreatorId = `${LpData?.Launchpad_by_pk?.creator_id.slice(0, 6)}...${LpData?.Launchpad_by_pk?.creator_id.slice(-4)}`;
 
 	return (
-		<div className="min-h-screen bg-gray-50 py-6 px-4 flex flex-col items-center">
-			<div className="sticky top-0 z-10 w-full ">
+		<div className="min-h-screen  text-gray-900">
+			<div className="sticky top-0 z-10 bg-white border-b border-gray-200">
 				<Header />
 			</div>
-			<div className="w-full   h-full flex-1  justify-center flex items-center gap-4">
-				<div className=" h-full flex-1  max-w-fit">
-					<TokenInfo
-						symbol={token.symbol}
-						name={token.name}
-						launchpadId={token.id}
-						creatorId={MOCK_LAUNCHPAD_DATA.data.Launchpad[0].creator.id}
-					/>
+
+			<div className="container mx-auto px-4 py-6">
+				<div className="flex items-center gap-4 mb-6">
+					<div>
+						<h1 className="text-2xl font-bold">
+							{token?.name} <p className="text-gray-600">{token?.symbol}</p>
+							<div className="flex gap-4 mt-2">
+								<a
+									href={`https://explorer.evm.testnet.cytonic.com/token/  ${tokenAddress}`}
+									target="_blank"
+									rel="noopener noreferrer"
+									className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+								>
+									Token on Explorer:
+									<span className="font-mono text-orange-600">{shortId}</span>
+								</a>
+
+								<a
+									href={`https://explorer.evm.testnet.cytonic.com/address/  ${LpData?.Launchpad_by_pk?.creator_id}`}
+									target="_blank"
+									rel="noopener noreferrer"
+									className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+								>
+									Creator:
+									<span className="font-mono text-orange-600">
+										{shortCreatorId}
+									</span>
+								</a>
+							</div>
+						</h1>
+					</div>
 				</div>
 
-				<div className="space-y-4 w-full max-w-[400px]">
-					<BalanceCard
-						launchpadAddress={MOCK_LAUNCHPAD_DATA.data.Launchpad[0].id}
-						name={token.name}
-						ethSupply={MOCK_LAUNCHPAD_DATA.data.Launchpad[0].totalEthRaised}
-					/>
+				<div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+					<div className="lg:col-span-2 space-y-6">
+						<TokenChart />
+					</div>
 
-					<TradePanel
-						name={token.name}
-						symbol={token.symbol}
-						launchpadAddress={MOCK_LAUNCHPAD_DATA.data.Launchpad[0].id}
-						tokenAddress={token.id}
-					/>
+					<div className="space-y-6">
+						<BalanceCard
+							launchpadAddress={LpData?.Launchpad_by_pk?.id || ""}
+							name={token?.name || ""}
+							ethSupply={LpData?.Launchpad_by_pk?.totalEthRaised || ""}
+						/>
+
+						<TradePanel
+							symbol={token?.symbol || ""}
+							name={token?.name || ""}
+							launchpadAddress={LpData?.Launchpad_by_pk?.id || ""}
+							tokenAddress={token?.id || ""}
+						/>
+
+						{/* <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200">
+							<h3 className="font-bold mb-2">Top Holders</h3>
+							<TopHolders tokenId={token?.id || ""} />
+						</div> */}
+					</div>
 				</div>
 			</div>
 		</div>
