@@ -1,5 +1,9 @@
 import { Buffer } from "buffer";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+	QueryClient,
+	QueryClientProvider,
+	useQuery,
+} from "@tanstack/react-query";
 import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
@@ -7,68 +11,116 @@ import {
 	useWriteContract,
 	useReadContract,
 	WagmiProvider,
-	useBalance,
+	useClient,
+	useSimulateContract,
 } from "wagmi";
-
 import { config } from "./rainbow.ts";
-
 import "./index.css";
 import "@rainbow-me/rainbowkit/styles.css";
 import { RainbowKitProvider, ConnectButton } from "@rainbow-me/rainbowkit";
 import { Toaster } from "@/components/ui";
 import Launchpad from "./lib/ABI/Launchpad.ts";
-import { zeroAddress } from "viem";
+import { Address, formatEther, maxUint256, zeroAddress } from "viem";
 import ERC20 from "./lib/ABI/ERC20.ts";
+import BigNumber from "bignumber.js";
+import { shorten } from "@/lib/utils";
+
+import { request } from "graphql-request";
+import { GET_LAUNCHPAD_QUERY, GRAPHQL_ENDPOINT } from "./launchpad-gql.ts";
 
 globalThis.Buffer = Buffer;
 
-/// убрать чейн свитчер
-/// убрать блок интерфеса если без кошелька
-/// NATIVE CURENCY SYMBOL вместо ETH
-
-const LAUNCHPAD_ADDRESS = "0x59a46012555054a143273A78590cff91327B3C7A";
-const TOKEN_ADDRESS = zeroAddress;
-const TOKEN_NAME = "TEST_NAME";
-const TOKEN_SYMBOL = "TEST_SYM";
-
 const queryClient = new QueryClient();
-
 const root = document.getElementById("root");
+
 if (!root) {
 	throw new Error("Root element not found");
 }
 
-const formatEther = (wei: bigint | undefined) => {
-	if (!wei) return "0";
-	return (Number(wei.toString()) / 10 ** 18).toFixed(4);
+const Header = () => {
+	return (
+		<div className="text-center mb-0 flex items-center w-full justify-end ">
+			<ConnectButton
+				chainStatus={"none"}
+				showBalance={true}
+				accountStatus={{
+					smallScreen: "avatar",
+					largeScreen: "full",
+				}}
+			/>
+		</div>
+	);
 };
 
-const App = () => {
-	const { isConnected, chain } = useAccount();
-	const nativeSymbol = chain?.nativeCurrency.symbol;
+const BalanceCard = ({
+	name,
+	ethSupply,
+	launchpadAddress,
+}: {
+	name: string;
+	ethSupply: string;
+	launchpadAddress: string;
+}) => {
+	const { address, isConnected } = useAccount();
+	const { chain } = useAccount();
+	const nativeSymbol = chain?.nativeCurrency?.symbol || "ETH";
 
-	const { writeContract, isPending: isWritePending } = useWriteContract();
-
-	const [buyEthAmount, setBuyEthAmount] = useState("");
-	const [sellTokenAmount, setSellTokenAmount] = useState("");
-	const [activeTab, setActiveTab] = useState<"buy" | "sell">("buy");
+	const { data: tokenAddress } = useReadContract({
+		address: launchpadAddress as Address,
+		abi: Launchpad,
+		functionName: "token",
+	});
 
 	const { data: tokenBalance } = useReadContract({
-		address: TOKEN_ADDRESS,
+		address: (tokenAddress as `0x${string}`) || zeroAddress,
 		abi: ERC20,
 		functionName: "balanceOf",
-		args: TOKEN_ADDRESS ? [TOKEN_ADDRESS] : undefined,
-		chainId: 52226,
+		args: address ? [address] : undefined,
 	});
 
-	const { data: ethSupply } = useReadContract({
-		address: LAUNCHPAD_ADDRESS,
-		abi: Launchpad,
-		functionName: "ethSupply",
-	});
+	return (
+		<div className="bg-white rounded-lg p-4 shadow-sm">
+			<div className="flex gap-2 items-center">
+				<span className="text-gray-500">Liquidity:</span>
+				<span className="font-medium">
+					{shorten(BigNumber(ethSupply))} {nativeSymbol}
+				</span>
+			</div>
+
+			<div className="flex justify-between text-sm">
+				<div className="flex items-center gap-2">
+					<div className="text-gray-500">{name} Balance: </div>
+					<div className="font-medium">
+						{isConnected && tokenBalance !== undefined
+							? shorten(BigNumber(formatEther(tokenBalance)))
+							: "0"}
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+};
+
+const BuyForm = ({
+	isConnected,
+	isWritePending,
+	onBuy,
+	tokenName,
+	launchpadAddress,
+}: {
+	isConnected: boolean;
+	isWritePending: boolean;
+	onBuy: (amount: string) => void;
+	tokenName: string;
+	launchpadAddress: string;
+}) => {
+	const { chain } = useAccount();
+	const nativeSymbol = chain?.nativeCurrency?.symbol || "ETH";
+
+	const [buyEthAmount, setBuyEthAmount] = useState("");
 
 	const { data: tokensOut } = useReadContract({
-		address: LAUNCHPAD_ADDRESS,
+		address: launchpadAddress as Address,
 		abi: Launchpad,
 		functionName: "getTokensOutAtCurrentSupply",
 		args:
@@ -77,8 +129,110 @@ const App = () => {
 				: undefined,
 	});
 
+	const setBuyTemplate = (amount: string) => {
+		setBuyEthAmount(amount);
+	};
+
+	const handleBuyClick = () => {
+		if (!buyEthAmount || parseFloat(buyEthAmount) <= 0) return;
+		onBuy(buyEthAmount);
+	};
+
+	return (
+		<div className="space-y-4">
+			<div>
+				<label className="block text-xs text-gray-500 mb-1">
+					{nativeSymbol} to spend
+				</label>
+				<div className="relative">
+					<input
+						type="number"
+						value={buyEthAmount}
+						onChange={(e) => setBuyEthAmount(e.target.value)}
+						placeholder="0.0"
+						className="w-full p-3 border border-gray-300 rounded-lg text-sm"
+						min="0"
+						disabled={isWritePending}
+					/>
+					<div className="absolute inset-y-0 right-0 flex items-center pr-3">
+						<span className="text-gray-500 text-sm">{nativeSymbol}</span>
+					</div>
+				</div>
+			</div>
+			<div className="flex space-x-2">
+				{[1, 10, 100].map((amount) => (
+					<button
+						key={amount}
+						onClick={() => setBuyTemplate(amount.toString())}
+						disabled={isWritePending}
+						className="flex-1 py-2 px-3 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700 text-xs rounded-lg transition-colors"
+					>
+						{amount} {nativeSymbol}
+					</button>
+				))}
+			</div>
+			{tokensOut?.toString() && parseFloat(buyEthAmount) > 0 && (
+				<div className="bg-green-50 rounded-lg p-3">
+					<div className="flex justify-between text-sm">
+						<span className="text-green-700">You receive:</span>
+						<span className="font-medium text-green-700">
+							{shorten(BigNumber(formatEther(tokensOut)))} {tokenName}
+						</span>
+					</div>
+				</div>
+			)}
+			<button
+				onClick={handleBuyClick}
+				disabled={
+					!isConnected ||
+					!buyEthAmount ||
+					parseFloat(buyEthAmount) <= 0 ||
+					isWritePending
+				}
+				className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg text-sm font-medium"
+			>
+				{isWritePending
+					? "Processing..."
+					: isConnected
+						? `Buy with ${shorten(BigNumber(buyEthAmount || 0))} ${nativeSymbol}`
+						: "Connect Wallet to Buy"}
+			</button>
+		</div>
+	);
+};
+
+const SellForm = ({
+	isConnected,
+	isWritePending,
+	onSell,
+	symbol,
+	launchpadAddress,
+}: {
+	isConnected: boolean;
+	isWritePending: boolean;
+	onSell: (amount: string, estimatedEthOut: bigint) => void;
+	symbol: string;
+	launchpadAddress: string;
+}) => {
+	const { address, chain } = useAccount();
+	const nativeSymbol = chain?.nativeCurrency?.symbol || "ETH";
+	const [sellTokenAmount, setSellTokenAmount] = useState("");
+
+	const { data: tokenAddress } = useReadContract({
+		address: launchpadAddress as Address,
+		abi: Launchpad,
+		functionName: "token",
+	});
+
+	const { data: tokenBalance } = useReadContract({
+		address: (tokenAddress as `0x${string}`) || zeroAddress,
+		abi: ERC20,
+		functionName: "balanceOf",
+		args: address ? [address] : undefined,
+	});
+
 	const { data: ethOut } = useReadContract({
-		address: LAUNCHPAD_ADDRESS,
+		address: launchpadAddress as Address,
 		abi: Launchpad,
 		functionName: "getEthersOutAtCurrentSupply",
 		args:
@@ -87,234 +241,337 @@ const App = () => {
 				: undefined,
 	});
 
-	const handleBuy = () => {
-		if (!buyEthAmount || parseFloat(buyEthAmount) <= 0) return;
-		const ethAmountInWei = BigInt(
-			Math.floor(parseFloat(buyEthAmount) * 10 ** 18),
+	const setSellPercentage = (percentage: number) => {
+		if (!tokenBalance) return;
+		try {
+			const balanceInEther = parseFloat(formatEther(tokenBalance));
+			const amount = (balanceInEther * percentage) / 100;
+			setSellTokenAmount(amount.toString());
+		} catch (error) {
+			console.error("Error calculating percentage:", error);
+			setSellTokenAmount("0");
+		}
+	};
+
+	const handleSellClick = () => {
+		if (!sellTokenAmount || parseFloat(sellTokenAmount) <= 0 || !ethOut) return;
+
+		onSell(sellTokenAmount, ethOut);
+	};
+	return (
+		<div className="space-y-4">
+			<div>
+				<label className="block text-xs text-gray-500 mb-1">
+					Tokens to sell
+				</label>
+				<div className="relative">
+					<input
+						type="number"
+						value={sellTokenAmount}
+						onChange={(e) => setSellTokenAmount(e.target.value)}
+						placeholder="0.0"
+						className="w-full p-3 border border-gray-300 rounded-lg text-sm"
+						min="0"
+						step="1"
+						disabled={isWritePending}
+					/>
+					<div className="absolute inset-y-0 right-0 flex items-center pr-3">
+						<span className="text-gray-500 text-sm">{symbol}</span>
+					</div>
+				</div>
+			</div>
+			<div className="flex space-x-2">
+				{[25, 50, 75, 100].map((percent) => (
+					<button
+						key={percent}
+						onClick={() => setSellPercentage(percent)}
+						disabled={isWritePending}
+						className="flex-1 py-2 px-3 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700 text-xs rounded-lg transition-colors"
+					>
+						{percent} %
+					</button>
+				))}
+			</div>
+			{ethOut?.toString() && parseFloat(sellTokenAmount) > 0 && (
+				<div className="bg-red-50 rounded-lg p-3">
+					<div className="flex justify-between text-sm">
+						<span className="text-red-700">You receive:</span>
+						<span className="font-medium text-red-700">
+							{shorten(BigNumber(formatEther(ethOut)))} {nativeSymbol}
+						</span>
+					</div>
+				</div>
+			)}
+			<button
+				onClick={handleSellClick}
+				disabled={
+					!isConnected ||
+					!sellTokenAmount ||
+					parseFloat(sellTokenAmount) <= 0 ||
+					isWritePending
+				}
+				className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg text-sm font-medium"
+			>
+				{isWritePending
+					? "Processing..."
+					: isConnected
+						? `Sell ${shorten(BigNumber(sellTokenAmount || 0))} ${symbol}`
+						: "Connect Wallet to Sell"}
+			</button>
+		</div>
+	);
+};
+
+const TradePanel = ({
+	name,
+	symbol,
+	launchpadAddress,
+	tokenAddress,
+}: {
+	name: string;
+	symbol: string;
+	launchpadAddress: string;
+	tokenAddress: string;
+}) => {
+	const { isConnected } = useAccount();
+	const [activeTab, setActiveTab] = useState<"buy" | "sell">("buy");
+	const [slippage, setSlippage] = useState("0.5");
+
+	const {
+		writeContract,
+		writeContractAsync,
+		isPending: isWritePending,
+	} = useWriteContract();
+
+	const handleBuy = (ethAmount: string) => {
+		const ethAmountInWei = BigInt(Math.floor(parseFloat(ethAmount) * 1e18));
+
+		const slippagePercent = parseFloat(slippage) || 0;
+
+		const amountOutMin = BigInt(
+			Math.floor(
+				BigNumber(ethAmountInWei)
+					.multipliedBy(1 - slippagePercent / 100)
+					.toNumber(),
+			),
 		);
+
 		writeContract({
-			address: LAUNCHPAD_ADDRESS,
+			address: launchpadAddress as Address,
 			abi: Launchpad,
 			functionName: "buyTokens",
-			args: [ethAmountInWei],
+			args: [amountOutMin],
 			value: ethAmountInWei,
 		});
 	};
 
-	const handleSell = () => {
-		if (!sellTokenAmount || parseFloat(sellTokenAmount) <= 0) return;
-		const tokenAmountInWei = BigInt(
-			Math.floor(parseFloat(sellTokenAmount) * 10 ** 18),
-		);
-		const minEthOut = ethOut ? (ethOut * BigInt(95)) / BigInt(100) : BigInt(0);
-		writeContract({
-			address: LAUNCHPAD_ADDRESS,
+	const handleSell = async (amount: string, estimatedEthOut: bigint) => {
+		if (!amount || parseFloat(amount) <= 0) return;
+
+		const tokenAmountInWei = BigInt(Math.floor(parseFloat(amount) * 1e18));
+		const slippagePercent = parseFloat(slippage) || 0;
+
+		const minEthOut =
+			(estimatedEthOut *
+				BigInt(Math.floor((1 - slippagePercent / 100) * 1000))) /
+			1000n;
+
+		await writeContractAsync({
+			abi: ERC20,
+			address: tokenAddress as Address,
+			functionName: "approve",
+			args: [launchpadAddress as Address, maxUint256],
+			chainId: 52226,
+		});
+
+		await writeContractAsync({
+			address: launchpadAddress as Address,
 			abi: Launchpad,
 			functionName: "sellTokens",
 			args: [tokenAmountInWei, minEthOut],
 		});
 	};
 
-	const setBuyTemplate = (amount: string) => {
-		setBuyEthAmount(amount);
-	};
+	return (
+		<div className="bg-white rounded-lg shadow-sm overflow-hidden">
+			<div className="flex border-b">
+				<button
+					onClick={() => setActiveTab("buy")}
+					className={`flex-1 py-3 text-center text-sm font-medium cursor-pointer ${
+						activeTab === "buy"
+							? "text-green-600 border-b-2 border-green-600"
+							: "text-gray-500"
+					}`}
+				>
+					Buy
+				</button>
+				<button
+					onClick={() => setActiveTab("sell")}
+					className={`flex-1 py-3 text-center text-sm font-medium cursor-pointer ${
+						activeTab === "sell"
+							? "text-red-600 border-b-2 border-red-600"
+							: "text-gray-500"
+					}`}
+				>
+					Sell
+				</button>
+			</div>
+
+			<div className="flex items-center gap-2 text-sm text-gray-600  justify-end pt-6 pr-4">
+				<label htmlFor="slippage" className="whitespace-nowrap">
+					Slippage:
+				</label>
+				<input
+					id="slippage"
+					type="number"
+					step="0.1"
+					min="0"
+					max="100"
+					value={slippage}
+					onChange={(e) => setSlippage(e.target.value)}
+					className="w-20 px-2 py-1 border border-gray-300 rounded text-sm text-right"
+				/>
+				<span>%</span>
+			</div>
+
+			<div className="p-4 space-y-4">
+				{activeTab === "buy" ? (
+					<BuyForm
+						tokenName={name}
+						isConnected={isConnected}
+						isWritePending={isWritePending}
+						onBuy={handleBuy}
+						launchpadAddress={launchpadAddress}
+					/>
+				) : (
+					<SellForm
+						symbol={symbol}
+						isConnected={isConnected}
+						isWritePending={isWritePending}
+						onSell={handleSell}
+						launchpadAddress={launchpadAddress}
+					/>
+				)}
+			</div>
+		</div>
+	);
+};
+
+/// добавить лайтвейт чартс
+/// добавить слипадж
+/// добавить табличку с топ токен холдерами
+/// сделать адаптивно
+/// протестить транзы
+
+const TokenInfo = ({
+	name,
+	symbol,
+	launchpadId,
+	creatorId,
+}: {
+	name: string;
+	symbol: string;
+	launchpadId: string;
+	creatorId: string;
+}) => {
+	const shortId = `${launchpadId.slice(0, 6)}...${launchpadId.slice(-4)}`;
+	const shortCreatorId = `${creatorId.slice(0, 6)}...${creatorId.slice(-4)}`;
+
+	const { chain } = useAccount();
 
 	return (
-		<div className="min-h-screen bg-gray-50 py-6 px-4  flex items-center justify-center">
-			<div className="w-[400px]">
-				{isConnected && (
-					<div className="text-center mb-0 flex items-center w-full justify-end ">
-						<div className="mb-4">
-							<ConnectButton showBalance={true} />
-						</div>
-					</div>
-				)}
+		<div className="bg-white rounded-xl p-4 shadow-md flex flex-col space-y-2 border border-gray-200">
+			<div className="flex items-center justify-between">
+				<div>
+					<p className="text-lg font-semibold text-gray-900">{name}</p>
+					<p className="text-sm text-gray-500">{symbol}</p>
+				</div>
+			</div>
+			<div className="flex flex-col">
+				<a
+					href={`https://explorer.evm.testnet.cytonic.com/token/${launchpadId}`}
+					target="_blank"
+					rel="noopener noreferrer"
+					className="inline-flex items-center gap-1 text-sm text-blue-600 "
+				>
+					Token on Explorer:
+					<span className="font-mono text-orange-700">{shortId}</span>
+				</a>
 
-				{isConnected && (
-					<div className="space-y-4">
-						<div className="bg-white rounded-lg p-4 shadow-sm">
-							<div className="flex justify-between text-sm">
-								<div>
-									<div className="text-gray-500">{TOKEN_NAME} Balance</div>
-									<div className="font-medium">
-										{tokenBalance ? formatEther(tokenBalance) : "0"}
-									</div>
-								</div>
-							</div>
-						</div>
+				<a
+					href={`https://explorer.evm.testnet.cytonic.com/address/${creatorId}`}
+					target="_blank"
+					rel="noopener noreferrer"
+					className="inline-flex items-center gap-1 text-sm text-blue-600 "
+				>
+					Creator:
+					<span className="font-mono text-orange-700">{shortCreatorId}</span>
+				</a>
+			</div>
+		</div>
+	);
+};
 
-						{ethSupply?.toString() && (
-							<div className="bg-white rounded-lg p-4 shadow-sm">
-								<div className="flex justify-between items-center">
-									<span className="text-gray-600">Liquidity:</span>
-									<span className="font-medium">
-										{formatEther(ethSupply)} {nativeSymbol}
-									</span>
-								</div>
-							</div>
-						)}
+const App = () => {
+	const { data: launchpadData } = useQuery({
+		queryKey: ["launchpad-data"],
+		queryFn: async () => {
+			return await request(GRAPHQL_ENDPOINT, GET_LAUNCHPAD_QUERY);
+		},
+	});
 
-						<div className="bg-white rounded-lg shadow-sm overflow-hidden">
-							<div className="flex border-b">
-								<button
-									onClick={() => setActiveTab("buy")}
-									className={`flex-1 py-3 text-center text-sm font-medium cursor-pointer ${
-										activeTab === "buy"
-											? "text-green-600 border-b-2 border-green-600"
-											: "text-gray-500"
-									}`}
-								>
-									Buy
-								</button>
-								<button
-									onClick={() => setActiveTab("sell")}
-									className={`flex-1 py-3 text-center text-sm font-medium cursor-pointer ${
-										activeTab === "sell"
-											? "text-red-600 border-b-2 border-red-600"
-											: "text-gray-500"
-									}`}
-								>
-									Sell
-								</button>
-							</div>
+	const MOCK_LAUNCHPAD_DATA = {
+		data: {
+			Launchpad: [
+				{
+					id: "0x4f3a86F6cf2d26459D86A6228febB98807D10a3c",
+					totalEthRaised: "71",
+					token: {
+						id: "0x91272F5Eed03DfB2e6D90597Db90Ab20200fad56",
+						name: "labubu token",
+						symbol: "LBUBU",
+						decimals: 18,
+					},
+					migrationInfo: null,
+					creator: {
+						id: "0xdb1c3ECF1b4C9f447b5609B6034c75E0F7137608",
+					},
+				},
+			],
+		},
+	};
 
-							<div className="p-4">
-								{activeTab === "buy" ? (
-									<div className="space-y-4">
-										<div>
-											<label className="block text-xs text-gray-500 mb-1">
-												{nativeSymbol} to spend
-											</label>
-											<div className="relative">
-												<input
-													type="number"
-													value={buyEthAmount}
-													onChange={(e) => setBuyEthAmount(e.target.value)}
-													placeholder="0.0"
-													className="w-full p-3 border border-gray-300 rounded-lg text-sm"
-													min="0"
-												/>
-												<div className="absolute inset-y-0 right-0 flex items-center pr-3">
-													<span className="text-gray-500 text-sm">
-														{nativeSymbol}
-													</span>
-												</div>
-											</div>
-										</div>
+	const token = MOCK_LAUNCHPAD_DATA.data.Launchpad[0].token;
 
-										<div className="flex space-x-2">
-											{[1, 10, 100].map((amount) => (
-												<button
-													key={amount}
-													onClick={() => setBuyTemplate(amount.toString())}
-													className="flex-1 py-2 px-3 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded-lg transition-colors"
-												>
-													{amount} {nativeSymbol}
-												</button>
-											))}
-										</div>
+	return (
+		<div className="min-h-screen bg-gray-50 py-6 px-4 flex flex-col items-center">
+			<div className="sticky top-0 z-10 w-full ">
+				<Header />
+			</div>
+			<div className="w-full   h-full flex-1  justify-center flex items-center gap-4">
+				<div className=" h-full flex-1  max-w-fit">
+					<TokenInfo
+						symbol={token.symbol}
+						name={token.name}
+						launchpadId={token.id}
+						creatorId={MOCK_LAUNCHPAD_DATA.data.Launchpad[0].creator.id}
+					/>
+				</div>
 
-										{tokensOut?.toString() && parseFloat(buyEthAmount) > 0 && (
-											<div className="bg-green-50 rounded-lg p-3">
-												<div className="flex justify-between text-sm">
-													<span className="text-green-700">You receive:</span>
-													<span className="font-medium text-green-700">
-														{formatEther(tokensOut)} {TOKEN_NAME}
-													</span>
-												</div>
-											</div>
-										)}
+				<div className="space-y-4 w-full max-w-[400px]">
+					<BalanceCard
+						launchpadAddress={MOCK_LAUNCHPAD_DATA.data.Launchpad[0].id}
+						name={token.name}
+						ethSupply={MOCK_LAUNCHPAD_DATA.data.Launchpad[0].totalEthRaised}
+					/>
 
-										<button
-											onClick={handleBuy}
-											disabled={
-												!buyEthAmount ||
-												parseFloat(buyEthAmount) <= 0 ||
-												isWritePending
-											}
-											className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg text-sm font-medium disabled:opacity-50"
-										>
-											{isWritePending
-												? "Processing..."
-												: `Buy with ${buyEthAmount || 0} ${nativeSymbol}`}
-										</button>
-									</div>
-								) : (
-									<div className="space-y-4">
-										<div>
-											<label className="block text-xs text-gray-500 mb-1">
-												Tokens to sell
-											</label>
-											<div className="relative">
-												<input
-													type="number"
-													value={sellTokenAmount}
-													onChange={(e) => setSellTokenAmount(e.target.value)}
-													placeholder="0.0"
-													className="w-full p-3 border border-gray-300 rounded-lg text-sm"
-													min="0"
-													step="1"
-												/>
-												<div className="absolute inset-y-0 right-0 flex items-center pr-3">
-													<span className="text-gray-500 text-sm">
-														{TOKEN_SYMBOL}
-													</span>
-												</div>
-											</div>
-										</div>
-										<div className="flex space-x-2">
-											{[25, 75, 100].map((amount) => (
-												<button
-													key={amount}
-													onClick={() =>
-														setBuyTemplate(
-															((tokenBalance / 100) * amount).toString(),
-														)
-													}
-													className="flex-1 py-2 px-3 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded-lg transition-colors"
-												>
-													{amount} %
-												</button>
-											))}
-										</div>
-
-										{ethOut?.toString() && parseFloat(sellTokenAmount) > 0 && (
-											<div className="bg-red-50 rounded-lg p-3">
-												<div className="flex justify-between text-sm">
-													<span className="text-red-700">You receive:</span>
-													<span className="font-medium text-red-700">
-														{formatEther(ethOut)} {nativeSymbol}
-													</span>
-												</div>
-											</div>
-										)}
-
-										<button
-											onClick={handleSell}
-											disabled={
-												!sellTokenAmount ||
-												parseFloat(sellTokenAmount) <= 0 ||
-												isWritePending
-											}
-											className="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded-lg text-sm font-medium disabled:opacity-50"
-										>
-											{isWritePending
-												? "Processing..."
-												: `Sell ${sellTokenAmount || 0} ${TOKEN_SYMBOL}`}
-										</button>
-									</div>
-								)}
-							</div>
-						</div>
-					</div>
-				)}
-
-				{!isConnected && (
-					<div className="text-center bg-white rounded-lg p-6 flex items-center flex-col">
-						<p className="text-gray-600 mb-4">Connect wallet to trade tokens</p>
-						<ConnectButton showBalance={false} />
-					</div>
-				)}
+					<TradePanel
+						name={token.name}
+						symbol={token.symbol}
+						launchpadAddress={MOCK_LAUNCHPAD_DATA.data.Launchpad[0].id}
+						tokenAddress={token.id}
+					/>
+				</div>
 			</div>
 		</div>
 	);
