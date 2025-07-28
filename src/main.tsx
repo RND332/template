@@ -20,21 +20,20 @@ import {
 	type LineData,
 	LineSeries,
 	type Time,
-	type WhitespaceData,
 } from "lightweight-charts";
 
 import { config } from "./rainbow.ts";
-import "./index.css";
 import "@rainbow-me/rainbowkit/styles.css";
 import { RainbowKitProvider, ConnectButton } from "@rainbow-me/rainbowkit";
-import { Toaster } from "@/components/ui";
 import Launchpad from "./lib/ABI/Launchpad.ts";
 import { Address, formatEther, maxUint256, zeroAddress } from "viem";
 import ERC20 from "./lib/ABI/ERC20.ts";
 import BigNumber from "bignumber.js";
-import { shorten } from "@/lib/utils";
-
+import { shorten } from "./lib/utils";
 import { request } from "graphql-request";
+
+import "./tailwind.css";
+
 import {
 	GET_LAUNCHPAD_QUERY,
 	GET_TRANSFERS,
@@ -42,18 +41,18 @@ import {
 	LaunchpadDataById,
 	TransfersData,
 } from "./launchpad-gql.ts";
-import { ERC20_GQL_ENDPOINT, GET_TOP_HOLDERS } from "./erc20-gql.ts";
 
 globalThis.Buffer = Buffer;
 
 const LAUNCHPAD_ID = "0x4f3a86F6cf2d26459D86A6228febB98807D10a3c";
 
-const queryClient = new QueryClient();
-const root = document.getElementById("root");
+const rootElement = document.getElementById("root");
 
-if (!root) {
-	throw new Error("Root element not found");
+if (!rootElement) {
+	throw new Error("");
 }
+
+const queryClient = new QueryClient();
 
 const Header = () => {
 	return (
@@ -97,7 +96,7 @@ const BalanceCard = ({
 	});
 
 	return (
-		<div className="bg-white rounded-lg p-4 shadow-sm">
+		<div className="bg-white rounded-lg p-4 shadow-sm ">
 			<div className="flex gap-2 items-center text-gray-500">
 				<span className="">Liquidity:</span>
 				<span className="font-medium">
@@ -696,80 +695,83 @@ const App = () => {
 	const shortCreatorId = `${LpData?.Launchpad_by_pk?.creator_id.slice(0, 6)}...${LpData?.Launchpad_by_pk?.creator_id.slice(-4)}`;
 
 	return (
-		<div className="min-h-screen  text-gray-900">
-			<div className="sticky top-0 z-10 bg-white border-b border-gray-200">
-				<Header />
-			</div>
+		<WagmiProvider config={config}>
+			<QueryClientProvider client={queryClient}>
+				<RainbowKitProvider>
+					<div className="min-h-screen  text-gray-900">
+						<div className="sticky top-0 z-10 bg-white border-b border-gray-200">
+							<Header />
+						</div>
 
-			<div className="container mx-auto px-4 py-6">
-				<div className="flex items-center gap-4 mb-6">
-					<div>
-						<h1 className="text-2xl font-bold">
-							{token?.name} <p className="text-gray-600">{token?.symbol}</p>
-							<div className="flex gap-4 mt-2">
-								<a
-									href={`https://explorer.evm.testnet.cytonic.com/token/  ${tokenAddress}`}
-									target="_blank"
-									rel="noopener noreferrer"
-									className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
-								>
-									Token on Explorer:
-									<span className="font-mono text-orange-600">{shortId}</span>
-								</a>
+						<div className="container mx-auto px-4 py-6">
+							<div className="flex items-center gap-4 mb-6">
+								<div>
+									<h1 className="text-2xl font-bold">
+										{token?.name}{" "}
+										<p className="text-gray-600">{token?.symbol}</p>
+										<div className="flex gap-4 mt-2">
+											<a
+												href={`https://explorer.evm.testnet.cytonic.com/token/  ${tokenAddress}`}
+												target="_blank"
+												rel="noopener noreferrer"
+												className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+											>
+												Token on Explorer:
+												<span className="font-mono text-orange-600">
+													{shortId}
+												</span>
+											</a>
 
-								<a
-									href={`https://explorer.evm.testnet.cytonic.com/address/  ${LpData?.Launchpad_by_pk?.creator_id}`}
-									target="_blank"
-									rel="noopener noreferrer"
-									className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
-								>
-									Creator:
-									<span className="font-mono text-orange-600">
-										{shortCreatorId}
-									</span>
-								</a>
+											<a
+												href={`https://explorer.evm.testnet.cytonic.com/address/  ${LpData?.Launchpad_by_pk?.creator_id}`}
+												target="_blank"
+												rel="noopener noreferrer"
+												className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+											>
+												Creator:
+												<span className="font-mono text-orange-600">
+													{shortCreatorId}
+												</span>
+											</a>
+										</div>
+									</h1>
+								</div>
 							</div>
-						</h1>
+
+							<div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+								<div className="lg:col-span-2 space-y-6">
+									<TokenChart />
+								</div>
+
+								<div className="space-y-6">
+									<BalanceCard
+										launchpadAddress={LpData?.Launchpad_by_pk?.id || ""}
+										name={token?.name || ""}
+										ethSupply={LpData?.Launchpad_by_pk?.totalEthRaised || ""}
+									/>
+
+									<TradePanel
+										symbol={token?.symbol || ""}
+										name={token?.name || ""}
+										launchpadAddress={LpData?.Launchpad_by_pk?.id || ""}
+										tokenAddress={token?.id || ""}
+									/>
+								</div>
+							</div>
+						</div>
 					</div>
-				</div>
-
-				<div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-					<div className="lg:col-span-2 space-y-6">
-						<TokenChart />
-					</div>
-
-					<div className="space-y-6">
-						<BalanceCard
-							launchpadAddress={LpData?.Launchpad_by_pk?.id || ""}
-							name={token?.name || ""}
-							ethSupply={LpData?.Launchpad_by_pk?.totalEthRaised || ""}
-						/>
-
-						<TradePanel
-							symbol={token?.symbol || ""}
-							name={token?.name || ""}
-							launchpadAddress={LpData?.Launchpad_by_pk?.id || ""}
-							tokenAddress={token?.id || ""}
-						/>
-
-						{/* <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200">
-							<h3 className="font-bold mb-2">Top Holders</h3>
-							<TopHolders tokenId={token?.id || ""} />
-						</div> */}
-					</div>
-				</div>
-			</div>
-		</div>
+				</RainbowKitProvider>
+			</QueryClientProvider>
+		</WagmiProvider>
 	);
 };
 
-ReactDOM.createRoot(root).render(
+ReactDOM.createRoot(rootElement).render(
 	<React.StrictMode>
 		<WagmiProvider config={config}>
 			<QueryClientProvider client={queryClient}>
 				<RainbowKitProvider>
 					<App />
-					<Toaster />
 				</RainbowKitProvider>
 			</QueryClientProvider>
 		</WagmiProvider>
