@@ -44,7 +44,7 @@ import {
 
 globalThis.Buffer = Buffer;
 
-const LAUNCHPAD_ID = "0x4f3a86F6cf2d26459D86A6228febB98807D10a3c";
+const LAUNCHPAD_ADDRESS = "0x4f3a86F6cf2d26459D86A6228febB98807D10a3c";
 
 const rootElement = document.getElementById("root");
 
@@ -517,17 +517,17 @@ const TokenChart = ({
 		isError,
 		error,
 	} = useQuery<TransfersData>({
-		queryKey: ["chart-transfers", LAUNCHPAD_ID],
+		queryKey: ["chart-transfers", LAUNCHPAD_ADDRESS],
 		queryFn: async () => {
 			return await request<TransfersData>(
 				LAUNCHPAD_GQL_ENDPOINT,
 				GET_TRANSFERS,
 				{
-					id: LAUNCHPAD_ID,
+					id: LAUNCHPAD_ADDRESS,
 				},
 			);
 		},
-		enabled: !!LAUNCHPAD_ID,
+		enabled: !!LAUNCHPAD_ADDRESS,
 	});
 
 	useEffect(() => {
@@ -640,7 +640,7 @@ const TokenChart = ({
 		height,
 		width,
 		transfersData,
-		LAUNCHPAD_ID,
+		LAUNCHPAD_ADDRESS,
 	]);
 
 	if (isLoading) {
@@ -677,13 +677,13 @@ const TokenChart = ({
 
 const App = () => {
 	const { data: LpData } = useQuery<LaunchpadDataById>({
-		queryKey: ["launchpad-data", LAUNCHPAD_ID],
+		queryKey: ["launchpad-data", LAUNCHPAD_ADDRESS],
 		queryFn: async () => {
 			return await request<LaunchpadDataById>(
 				LAUNCHPAD_GQL_ENDPOINT,
 				GET_LAUNCHPAD_QUERY,
 				{
-					id: LAUNCHPAD_ID,
+					id: LAUNCHPAD_ADDRESS,
 				},
 			);
 		},
