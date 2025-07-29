@@ -52,6 +52,7 @@ import {
 	gql,
 	useQuery as useGraphQLQuery,
 } from "@apollo/client";
+import "./tailwind.css";
 
 const TOKEN_ID = "0x8b3e3498a7bD92eCCBCF4CF7f1924c70CdDBd9B3";
 const GRAPHQL_ENDPOINT = "https://erc20-indexer-ai.cytonic.com/v1/graphql";
